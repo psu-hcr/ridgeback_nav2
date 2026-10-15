@@ -75,7 +75,7 @@ ARGUMENTS = [
 
 def launch_setup(context, *args, **kwargs):
     # Packages
-    pkg_clearpath_nav2_demos = get_package_share_directory('clearpath_nav2_demos')
+    pkg_clearpath_nav2_demos = get_package_share_directory('ridgeback_nav2')
     pkg_slam_toolbox = get_package_share_directory('slam_toolbox')
 
     # Launch Configurations

@@ -5,8 +5,10 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
+    GroupAction,
     IncludeLaunchDescription,
 )
+from launch_ros.actions import PushRosNamespace
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 
@@ -50,6 +52,7 @@ def generate_launch_description():
     localization = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(nav2_localization_launch),
         launch_arguments={
+            'namespace': 'r100_0165',
             'map': map_file,
             'use_sim_time': use_sim_time,
             'params_file': rewritten_params,
@@ -81,5 +84,8 @@ def generate_launch_description():
             description='2D laser scan topic used by AMCL'
         ),
 
-        localization,
+        GroupAction([
+            PushRosNamespace('r100_0165'),
+            localization,
+        ]),
     ])
