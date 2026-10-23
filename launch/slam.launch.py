@@ -101,7 +101,6 @@ def launch_setup(context, *args, **kwargs):
     file_parameters = PathJoinSubstitution([
         pkg_clearpath_nav2_demos,
         'config',
-        platform_model,
         'slam.yaml'])
 
     rewritten_parameters = RewrittenYaml(

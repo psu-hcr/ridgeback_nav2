@@ -25,109 +25,66 @@
 # CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
+"""Standard navigation only. Run localization separately before sending goals."""
 import os
-
 from ament_index_python.packages import get_package_share_directory
-
 from clearpath_config.clearpath_config import ClearpathConfig
 from clearpath_config.common.utils.yaml import read_yaml
-
 from launch import LaunchDescription
-from launch.actions import (
-    DeclareLaunchArgument,
-    GroupAction,
-    IncludeLaunchDescription,
-    OpaqueFunction
-)
-from launch.launch_description_sources import PythonLaunchDescriptionSource
-
-from launch.substitutions import (
-    LaunchConfiguration,
-    PathJoinSubstitution
-)
-
-from launch_ros.actions import PushRosNamespace, SetRemap
-
+from launch.actions import DeclareLaunchArgument, OpaqueFunction
+from launch.substitutions import LaunchConfiguration
+from launch_ros.actions import Node
+from launch_ros.descriptions import ParameterFile
 from nav2_common.launch import RewrittenYaml
 
 
-ARGUMENTS = [
-    DeclareLaunchArgument('use_sim_time', default_value='false',
-                          choices=['true', 'false'],
-                          description='Use sim time'),
-    DeclareLaunchArgument('setup_path',
-                          default_value='/etc/clearpath/',
-                          description='Clearpath setup path'),
-    DeclareLaunchArgument('scan_topic',
-                          default_value='',
-                          description='Override the default 2D laserscan topic')
-]
-
-
-def launch_setup(context, *args, **kwargs):
-    # Packages
-    pkg_clearpath_nav2_demos = get_package_share_directory('ridgeback_nav2')
-    pkg_nav2_bringup = get_package_share_directory('nav2_bringup')
-
-    # Launch Configurations
-    use_sim_time = LaunchConfiguration('use_sim_time')
-    setup_path = LaunchConfiguration('setup_path')
-    scan_topic = LaunchConfiguration('scan_topic')
-
-    # Read robot YAML
-    config = read_yaml(os.path.join(setup_path.perform(context), 'robot.yaml'))
-    # Parse robot YAML into config
-    clearpath_config = ClearpathConfig(config)
-
-    namespace = clearpath_config.system.namespace
-    platform_model = clearpath_config.platform.get_platform_model()
-
-    # see if we've overridden the scan_topic
-    eval_scan_topic = scan_topic.perform(context)
-    if len(eval_scan_topic) == 0:
-        eval_scan_topic = f'/{namespace}/sensors/lidar2d_0/scan'
-
-    file_parameters = PathJoinSubstitution([
-        pkg_clearpath_nav2_demos,
-        'config',
-        platform_model,
-        'nav2.yaml'])
-
-    rewritten_parameters = RewrittenYaml(
-        source_file=file_parameters,
-        param_rewrites={
-            # the only *.topic parameters are scan.topic, so rewrite all of them to point to
-            # our desired scan_topic
-            'topic': eval_scan_topic,
-        },
-        convert_types=True
-    )
-
-    launch_nav2 = PathJoinSubstitution(
-      [pkg_nav2_bringup, 'launch', 'navigation_launch.py'])
-
-    nav2 = GroupAction([
-        PushRosNamespace(namespace),
-        SetRemap('/' + namespace + '/odom',
-                 '/' + namespace + '/platform/odom'),
-        SetRemap('/tf', '/' + namespace + '/tf'),
-        SetRemap('/tf_static', '/' + namespace + '/tf_static'),
-
-        IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(launch_nav2),
-            launch_arguments=[
-                ('use_sim_time', use_sim_time),
-                ('params_file', rewritten_parameters),
-                ('use_composition', 'False'),
-                ('namespace', namespace)
-              ]
-        ),
-    ])
-
-    return [nav2]
+def launch_setup(context):
+    setup = LaunchConfiguration('setup_path').perform(context)
+    config = ClearpathConfig(read_yaml(os.path.join(setup, 'robot.yaml')))
+    namespace = config.system.namespace.strip('/')
+    prefix = '/' + namespace if namespace else ''
+    scan = LaunchConfiguration('scan_topic').perform(context)
+    if not scan:
+        scan = prefix + '/sensors/lidar2d_0/scan'
+    elif not scan.startswith('/'):
+        scan = prefix + '/' + scan
+    params = ParameterFile(RewrittenYaml(
+        source_file=LaunchConfiguration('params_file'), root_key=namespace,
+        param_rewrites={'topic': scan, 'map_topic': prefix + '/map',
+                        'odom_topic': prefix + '/platform/odom/filtered'},
+        convert_types=True), allow_substs=True)
+    tf = [('/tf', prefix + '/tf'), ('/tf_static', prefix + '/tf_static')]
+    specs = [
+        ('nav2_controller', 'controller_server', [('cmd_vel', 'cmd_vel_nav')]),
+        ('nav2_planner', 'planner_server', []),
+        ('nav2_smoother', 'smoother_server', []),
+        ('nav2_behaviors', 'behavior_server', [('cmd_vel', 'cmd_vel_nav')]),
+        ('nav2_bt_navigator', 'bt_navigator', []),
+        ('nav2_waypoint_follower', 'waypoint_follower', []),
+        ('nav2_velocity_smoother', 'velocity_smoother', [('cmd_vel', 'cmd_vel_nav')]),
+        ('nav2_collision_monitor', 'collision_monitor', []),
+    ]
+    nodes = [Node(package=package, executable=name, name=name,
+                  namespace=namespace, output='screen',
+                  parameters=[params, {'use_sim_time': LaunchConfiguration('use_sim_time')}],
+                  remappings=tf + remaps)
+             for package, name, remaps in specs]
+    nodes.append(Node(
+        package='nav2_lifecycle_manager', executable='lifecycle_manager',
+        name='lifecycle_manager_navigation', namespace=namespace, output='screen',
+        parameters=[{'use_sim_time': LaunchConfiguration('use_sim_time'),
+                     'autostart': LaunchConfiguration('autostart'),
+                     'node_names': [name for _, name, _ in specs]}]))
+    return nodes
 
 
 def generate_launch_description():
-    ld = LaunchDescription(ARGUMENTS)
-    ld.add_action(OpaqueFunction(function=launch_setup))
-    return ld
+    return LaunchDescription([
+        DeclareLaunchArgument('setup_path', default_value='/home/digifocus/clearpath'),
+        DeclareLaunchArgument('use_sim_time', default_value='false', choices=['true', 'false']),
+        DeclareLaunchArgument('autostart', default_value='true', choices=['true', 'false']),
+        DeclareLaunchArgument('scan_topic', default_value=''),
+        DeclareLaunchArgument('params_file', default_value=os.path.join(
+            get_package_share_directory('ridgeback_nav2'), 'config', 'nav2.yaml')),
+        OpaqueFunction(function=launch_setup),
+    ])
