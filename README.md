@@ -69,7 +69,7 @@ source install/setup.bash
 ## Read saved Ridgeback power logs on another computer
 
 The power logger saves ROS 2 MCAP bags on the Ridgeback under
-`/home/robot/rosbags/power/session_*`, with approximately one-minute segments.
+`/home/robot/rosbags/power/session_*`, with approximately 15-minute segments.
 Run the following commands on the **Jetson or other destination computer**.
 Replace the robot address, session name, and topic prefix as needed.
 
@@ -153,7 +153,7 @@ ros2 bag play ~/ridgeback_logs/session_REPLACE_ME --delay 3
 ```
 
 Messages appear as YAML in terminal 1. Playback ends at the end of the recording;
-press Ctrl+C in terminal 1 to stop the reader. To inspect just one copied minute,
+press Ctrl+C in terminal 1 to stop the reader. To inspect just one copied 15-minute segment,
 replace the session directory with its `.mcap` file in either `ros2 bag info` or
 `ros2 bag play`:
 
