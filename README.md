@@ -65,3 +65,103 @@ source install/setup.bash
 - The demos do **not** start a robot; launch `clearpath_robot` or `clearpath_simulator` first.
 - Pick the config that matches your platform. Mismatched footprints/sensor frames are a common
   cause of poor navigation behavior.
+
+## Read saved Ridgeback power logs on another computer
+
+The power logger saves ROS 2 MCAP bags on the Ridgeback under
+`/home/robot/rosbags/power/session_*`, with approximately one-minute segments.
+Run the following commands on the **Jetson or other destination computer**.
+Replace the robot address, session name, and topic prefix as needed.
+
+### List and copy recordings
+
+List sessions, newest first, and list their segment files:
+
+```bash
+ssh robot@192.168.131.1 'ls -1dt ~/rosbags/power/session_*'
+ssh robot@192.168.131.1 'ls -lh ~/rosbags/power/session_*/*.mcap'
+```
+
+Choose a completed session and copy its entire directory, including
+`metadata.yaml` and all `.mcap` files:
+
+```bash
+mkdir -p ~/ridgeback_logs
+scp -r robot@192.168.131.1:/home/robot/rosbags/power/session_REPLACE_ME ~/ridgeback_logs/
+```
+
+For a smaller transfer, copy one completed segment instead:
+
+```bash
+scp robot@192.168.131.1:/home/robot/rosbags/power/session_REPLACE_ME/SEGMENT_REPLACE_ME.mcap ~/ridgeback_logs/
+```
+
+The newest session may still be recording. Prefer an older session, or a segment
+from the current session that has a newer segment after it. Avoid copying the
+file currently being written; session metadata is finalized when recording ends.
+Once copied, the files can be read without a connection to the robot.
+
+### Prepare the destination computer
+
+Use ROS 2 Jazzy with the rosbag tools, MCAP storage plugin, Fast DDS middleware,
+and Clearpath platform message definitions. On Ubuntu with the ROS apt
+repository configured, install missing packages:
+
+```bash
+sudo apt update
+sudo apt install ros-jazzy-ros2bag ros-jazzy-rosbag2-transport \
+  ros-jazzy-rosbag2-storage-mcap ros-jazzy-rmw-fastrtps-cpp \
+  ros-jazzy-clearpath-platform-msgs
+```
+
+If using workspace-built Clearpath messages, source that workspace after the
+base ROS setup instead. The message definitions must match the recorded type.
+
+### Inspect and read the copied messages
+
+In **both playback and echo terminals**, run this setup. It selects local Fast
+DDS playback even if the Jetson normally uses the robot's Zenoh router, and
+keeps replay in a separate domain restricted to this computer:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+export ROS_DOMAIN_ID=99
+export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
+unset ROS_STATIC_PEERS ROS_DISCOVERY_SERVER ROS_LOCALHOST_ONLY
+unset FASTRTPS_DEFAULT_PROFILES_FILE FASTDDS_DEFAULT_PROFILES_FILE
+```
+
+Inspect a copied session to see its topics, message counts, and duration:
+
+```bash
+ros2 bag info ~/ridgeback_logs/session_REPLACE_ME
+```
+
+In **terminal 1**, start the reader before playback so it can receive the first
+messages. Use the topic name shown by `ros2 bag info`:
+
+```bash
+ros2 topic echo /r100_0165/platform/mcu/status/power \
+  clearpath_platform_msgs/msg/Power --qos-reliability best_effort
+```
+
+In **terminal 2**, replay the copied session:
+
+```bash
+ros2 bag play ~/ridgeback_logs/session_REPLACE_ME --delay 3
+```
+
+Messages appear as YAML in terminal 1. Playback ends at the end of the recording;
+press Ctrl+C in terminal 1 to stop the reader. To inspect just one copied minute,
+replace the session directory with its `.mcap` file in either `ros2 bag info` or
+`ros2 bag play`:
+
+```bash
+ros2 bag info ~/ridgeback_logs/SEGMENT_REPLACE_ME.mcap
+ros2 bag play ~/ridgeback_logs/SEGMENT_REPLACE_ME.mcap --delay 3
+```
+
+See the [rosbag2 documentation](https://github.com/ros2/rosbag2/tree/jazzy)
+for playback options and the [Clearpath Power message definition](https://github.com/clearpathrobotics/clearpath_msgs/blob/jazzy/clearpath_platform_msgs/msg/Power.msg)
+for field meanings.
